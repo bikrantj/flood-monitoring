@@ -1,3 +1,4 @@
+import {Redis} from '@upstash/redis';
 import {NextResponse} from 'next/server';
 
 // Interface for the data structure
@@ -8,13 +9,19 @@ interface FloodData {
   distance_inches: number;
 }
 
+const redis = Redis.fromEnv();
 // GET handler for /api/flood-data?duration=1000
 export async function GET(request: Request) {
   try {
     // Extract query parameters
     const {searchParams} = new URL(request.url);
     const durationStr = searchParams.get('duration');
+    const code = searchParams.get('code')
+    const timestamp = searchParams.get('timestamp') as string;
 
+    if (code !== process.env.SECRET) {
+      return NextResponse.json({error: 'Unauthorized'}, {status: 401})
+    }
     // Validate duration parameter
     if (!durationStr) {
       return NextResponse.json(
@@ -29,11 +36,11 @@ export async function GET(request: Request) {
 
     // Calculate distances
     const distance_cm = duration / 58;  // Speed of sound: 340 m/s
+    const distance_meters = distance_cm / 100;
     const distance_inches =
         distance_cm / 2.54;  // Exact cm-to-inches conversion
 
     // Generate timestamp (ISO 8601 format)
-    const timestamp = new Date().toISOString();
 
     // Create data object
     const floodData: FloodData = {

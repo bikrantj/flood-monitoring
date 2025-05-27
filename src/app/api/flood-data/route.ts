@@ -1,4 +1,4 @@
-import {Redis} from '@upstash/redis';
+// import {Redis} from '@upstash/redis';
 import {NextResponse} from 'next/server';
 
 // Interface for the data structure
@@ -9,7 +9,7 @@ interface FloodData {
   distance_inches: number;
 }
 
-const redis = Redis.fromEnv();
+// const redis = Redis.fromEnv();
 // GET handler for /api/flood-data?duration=1000
 export async function GET(request: Request) {
   try {
@@ -36,7 +36,6 @@ export async function GET(request: Request) {
 
     // Calculate distances
     const distance_cm = duration / 58;  // Speed of sound: 340 m/s
-    const distance_meters = distance_cm / 100;
     const distance_inches =
         distance_cm / 2.54;  // Exact cm-to-inches conversion
 

@@ -40,7 +40,7 @@ export async function GET(request: Request) {
     }
 
     // Fetch from PostgreSQL using Prisma Accelerate
-    const whereClause: any = {location};
+    const whereClause: Record<string, any> = {location};
     if (startTime && endTime) {
       whereClause.timestamp = {
         gte: new Date(startTime),

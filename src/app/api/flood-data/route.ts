@@ -1,6 +1,4 @@
 import {prisma} from '@/lib/db';
-import {PrismaClient} from '@prisma/client';
-import {withAccelerate} from '@prisma/extension-accelerate';
 import {Redis} from '@upstash/redis';
 import {NextResponse} from 'next/server';
 

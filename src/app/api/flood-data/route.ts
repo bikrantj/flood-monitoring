@@ -1,62 +1,120 @@
-// import {Redis} from '@upstash/redis';
+import {prisma} from '@/lib/db';
+import {PrismaClient} from '@prisma/client';
+import {withAccelerate} from '@prisma/extension-accelerate';
+import {Redis} from '@upstash/redis';
 import {NextResponse} from 'next/server';
 
+
+
+// Initialize Redis client
+const redis = Redis.fromEnv();
+
 // Interface for the data structure
-interface FloodData {
+export interface FloodData {
   timestamp: string;
-  duration_us: number;
-  distance_cm: number;
-  distance_inches: number;
+  waterHeight: number;
+  location: string;
 }
 
-// const redis = Redis.fromEnv();
-// GET handler for /api/flood-data?duration=1000
-export async function GET(request: Request) {
+// GET handler for /api/flood-data?code=pswd&water_height=1000&location=Bagmati
+export const GET = async (request: Request) => {
   try {
     // Extract query parameters
     const {searchParams} = new URL(request.url);
-    const durationStr = searchParams.get('duration');
-    const code = searchParams.get('code')
-    const timestamp = searchParams.get('timestamp') as string;
+    const code = searchParams.get('code');
+    const waterHeightStr = searchParams.get('water_height');
+    const location = searchParams.get('location');
 
+    // Validate authentication code
     if (code !== process.env.SECRET) {
-      return NextResponse.json({error: 'Unauthorized'}, {status: 401})
+      return NextResponse.json({error: 'Unauthorized'}, {status: 401});
     }
-    // Validate duration parameter
-    if (!durationStr) {
+
+    // Validate required parameters
+    if (!waterHeightStr || !location) {
       return NextResponse.json(
-          {error: 'Missing duration parameter'}, {status: 400});
+          {error: 'Missing water_height or location parameter'}, {status: 400});
     }
 
-    const duration = parseInt(durationStr, 10);
-    if (isNaN(duration) || duration < 0) {
+    // Parse water height
+    const waterHeight = parseFloat(waterHeightStr);
+    if (isNaN(waterHeight) || waterHeight < 0) {
       return NextResponse.json(
-          {error: 'Invalid duration value'}, {status: 400});
+          {error: 'Invalid water_height value'}, {status: 400});
     }
 
-    // Calculate distances
-    const distance_cm = duration / 58;  // Speed of sound: 340 m/s
-    const distance_inches =
-        distance_cm / 2.54;  // Exact cm-to-inches conversion
-
-    // Generate timestamp (ISO 8601 format)
+    // Fetch Nepal (Kathmandu) local time using timeapi.io
+    let timestamp: string;
+    try {
+      const timeResponse = await fetch(
+          'https://timeapi.io/api/Time/current/zone?timeZone=Asia/Kathmandu');
+      if (!timeResponse.ok) {
+        throw new Error(`Time API error: ${timeResponse.status}`);
+      }
+      const timeData = await timeResponse.json();
+      timestamp = timeData.dateTime;  // ISO 8601 format in Nepal time
+    } catch (timeError) {
+      console.error('Error fetching Nepal time from timeapi.io:', timeError);
+      // Fallback to provided system time (Nepal, 2025-06-06 12:44:00 +0545)
+      timestamp = new Date('2025-06-06T12:44:00+05:45').toISOString();
+    }
 
     // Create data object
     const floodData: FloodData = {
       timestamp,
-      duration_us: duration,
-      distance_cm,
-      distance_inches,
+      waterHeight,
+      location,
     };
 
+    // Save to PostgreSQL using Prisma Accelerate
+    await prisma.floodData.create({
+      data: {
+        timestamp: new Date(timestamp),
+        waterHeight,
+        location,
+      },
+    });
+
+    // Invalidate cache for this location using SCAN
+    const cachePattern = `flood_data:${location}:*`;
+    try {
+      let cursor = '0';
+      const keysToDelete: string[] = [];
+      do {
+        const [nextCursor, keys] = await redis.scan(cursor, {
+          match: cachePattern,
+          count: 100,  // Adjust based on expected key volume
+        });
+        cursor = nextCursor;
+        keysToDelete.push(...keys);
+      } while (cursor !== '0');
+
+      if (keysToDelete.length > 0) {
+        await redis.del(...keysToDelete);
+      }
+
+      // Also clear the cache set key
+      const cacheSetKey = `flood_cache_keys:${location}`;
+      await redis.del(cacheSetKey);
+    } catch (redisError) {
+      console.error('Error invalidating Redis cache:', redisError);
+      // Continue even if cache invalidation fails
+    }
+
     // Log to console
-    console.log('Flood Data:', floodData);
+    console.log('Flood Data Saved:', floodData);
 
     // Return success response
     return NextResponse.json(
-        {message: 'Data received', status: floodData}, {status: 200});
+        {message: 'Data saved successfully', data: floodData}, {status: 200});
   } catch (error) {
     console.error('Error processing request:', error);
     return NextResponse.json({error: 'Internal server error'}, {status: 500});
   }
-}
+};
+
+
+
+export const config = {
+  runtime: 'edge',
+};

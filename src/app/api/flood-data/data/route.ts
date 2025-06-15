@@ -5,34 +5,27 @@ import {NextResponse} from 'next/server';
 import {FloodData} from '../route';
 
 const redis = Redis.fromEnv();
+
 // GET handler to retrieve data for the line chart
 export async function GET(request: Request) {
+  console.log("API HIT")
   try {
     const {searchParams} = new URL(request.url);
     const location = searchParams.get('location');
     const startTime = searchParams.get('start_time');  // ISO 8601 string
     const endTime = searchParams.get('end_time');      // ISO 8601 string
 
-    // Validate parameters
-    if (!location) {
-      return NextResponse.json(
-          {error: 'Missing location parameter'}, {status: 400});
-    }
-
     // Generate cache key
     const cacheKey =
-        `flood_data:${location}:${startTime || 'all'}:${endTime || 'all'}`;
-    const cacheSetKey = `flood_cache_keys:${location}`;
+        `flood_data:${location || 'all'}:${startTime || 'all'}:${endTime || 'all'}`;
+    const cacheSetKey = `flood_cache_keys:${location || 'all'}`;
 
     // Try to fetch from Redis cache
     try {
-      const cachedData: string|null = await redis.get(cacheKey);
-      if (!cachedData) {
-        throw new Error('Cached Data not found')
-      }
+      const cachedData = await redis.get(cacheKey);
       if (cachedData) {
         console.log('Cache hit for:', cacheKey);
-        return NextResponse.json({data: JSON.parse(cachedData)}, {status: 200});
+        return NextResponse.json({data: JSON.parse(cachedData as string)}, {status: 200});
       }
     } catch (redisError) {
       console.error('Error accessing Redis cache:', redisError);
@@ -40,7 +33,10 @@ export async function GET(request: Request) {
     }
 
     // Fetch from PostgreSQL using Prisma Accelerate
-    const whereClause: Record<string, any> = {location};
+    const whereClause: Record<string, any> = {};
+    if (location) {
+      whereClause.location = location;
+    }
     if (startTime && endTime) {
       whereClause.timestamp = {
         gte: new Date(startTime),
@@ -65,7 +61,6 @@ export async function GET(request: Request) {
                    waterHeight: item.waterHeight,
                    location: item.location,
                  }));
-
     // Cache the result in Redis (e.g., for 1 hour)
     try {
       await redis.set(cacheKey, JSON.stringify(formattedData), {ex: 3600});
@@ -81,4 +76,4 @@ export async function GET(request: Request) {
     console.error('Error fetching data:', error);
     return NextResponse.json({error: 'Internal server error'}, {status: 500});
   }
-};
+}
